@@ -1,0 +1,23 @@
+[package]
+name = "bepinex_installer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde_with = "3.4"
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+
+thiserror = "1.0"
+anyhow = { version = "1.0", features = ["backtrace"] }
+
+walkdir = "2.0"
+
+# The windows crate is required to work around a limitation in the std::process::Command API.
+# ref: https://github.com/rust-lang/rust/issues/54760#issuecomment-1045940560
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.52"
+features = [
+  "Win32_Foundation",
+  "Win32_System_Console",
+]
