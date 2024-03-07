@@ -1,7 +1,23 @@
 use std::str::FromStr;
+use std::path::PathBuf;
 use std::fmt::Display;
 
+use serde::{Serialize, Deserialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
+
+#[derive(Serialize, Deserialize, Debug)]
+pub enum FileAction {
+	Create,
+	Remove,
+	Modify,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct TrackedFile {
+	pub action: FileAction,
+	pub path: PathBuf,
+	pub context: Option<String>,
+}
 
 #[derive(SerializeDisplay, DeserializeFromStr)]
 pub struct PackageReference {
@@ -14,6 +30,7 @@ pub struct PackageReference {
 pub enum PackageReferenceParseError {
 	#[error("Expected {expected} sections, got {got}.")]
 	NumSections { expected: usize, got: usize },
+
 	#[error("Failed to parse version: {0}.")]
 	VersionParseFail(#[from] VersionParseError)
 }

@@ -3,7 +3,7 @@ use std::path::{PathBuf, Path};
 
 use anyhow::Result;
 use walkdir::WalkDir;
-use crate::types::PackageReference;
+use crate::types::{PackageReference, TrackedFile, FileAction};
 
 pub fn install_bep(
     package: PackageReference,
@@ -11,11 +11,18 @@ pub fn install_bep(
     package_dir: PathBuf,
     state_dir: PathBuf,
     game_dir: PathBuf,
-) -> Result<Vec<PathBuf>> {
+) -> Result<Vec<TrackedFile>> {
     let state_dir = state_dir.canonicalize()?;
     let game_dir = game_dir.canonicalize()?;
-    
-    let bep_dir = package_dir.join("BepInExPack/BepInEx");   
+
+    let bepinex_root = WalkDir::new(package_dir)
+        .into_iter()
+        .filter_map(|x| x.ok()).filter(|x| x.path().is_file())
+        .find(|x| x.path().file_name().unwrap() == "winhttp.dll")
+        .expect("Failed to find winhttp.dll within BepInEx directory.");
+    let bepinex_root = bepinex_root.path().parent().unwrap();
+
+    let bep_dir = bepinex_root.join("BepInEx");
     let bep_dest = state_dir.join("BepInEx");
 
     let mut tracked = vec![];
@@ -34,12 +41,15 @@ pub fn install_bep(
         }
 
         fs::copy(file.path(), &dest)?;
-        tracked.push(dest);
+        tracked.push(TrackedFile {
+            action: FileAction::Create,
+            path: dest,
+            context: None,
+        });
     }
 
     // Install top-level doorstop files.
-    let bep_dir = package_dir.join("BepInExPack");
-    let files = fs::read_dir(&bep_dir)?
+    let files = fs::read_dir(bepinex_root)?
         .filter_map(|e| e.ok())
         .filter(|x| x.path().is_file());
 
@@ -47,7 +57,11 @@ pub fn install_bep(
         let dest = game_dir.join(file.path().file_name().unwrap());
 
         fs::copy(file.path(), &dest)?;
-        tracked.push(dest);
+        tracked.push(TrackedFile {
+            action: FileAction::Create,
+            path: dest,
+            context: None,
+        });
     }
 
     Ok(tracked)
@@ -59,12 +73,10 @@ pub fn install_bep_mod(
     package_dir: PathBuf,
     state_dir: PathBuf,
     game_dir: PathBuf,
-) -> Result<Vec<PathBuf>> {
+) -> Result<Vec<TrackedFile>> {
     let state_dir = state_dir.canonicalize()?;
-
-    let mut tracked_files = Vec::new();
-
     let full_name= format!("{}-{}", package.namespace, package.name);
+    let mut tracked = Vec::new();
 
     let targets = vec![
         ("plugins", true),
@@ -75,10 +87,7 @@ pub fn install_bep_mod(
      .map(|(x, y)| (Path::new(x), y));
 
     let default = state_dir.join("BepInEx/plugins");
-
     for (target, relocate) in targets {
-        // println!("target: {target:#?}, relocate: {relocate}");
-        
         // Packages may either have the target at their tld or BepInEx/target.
         let src = match package_dir.join("BepInEx").exists() {
             true => package_dir.join("BepInEx").join(target),
@@ -87,8 +96,6 @@ pub fn install_bep_mod(
         
         // let src = package_dir.join(target);
         let dest = state_dir.join("BepInEx").join(target);
-
-        // eprintln!("{:?}", src);
 
         if !src.exists() {
             continue;
@@ -116,15 +123,17 @@ pub fn install_bep_mod(
                 fs::create_dir_all(entry_parent)?;
             }
 
-            // println!("entry: {}, entry_dest: {}", entry.display(), entry_dest.display());
-
             if entry.is_dir(){
-                tracked_dir_copy(&entry, &entry_dest, &mut tracked_files)?;
+                tracked_dir_copy(&entry, &entry_dest, &mut tracked)?;
             }
 
             if entry.is_file() {
                 fs::copy(entry, &entry_dest)?;
-                tracked_files.push(entry_dest);
+                tracked.push(TrackedFile {
+                    action: FileAction::Create,
+                    path: entry_dest.clone(),
+                    context: None,
+                });
             }
         }
     }
@@ -143,14 +152,34 @@ pub fn install_bep_mod(
         }
 
         fs::copy(file.path(), &dest)?;
-        tracked_files.push(dest);
+        tracked.push(TrackedFile {
+            action: FileAction::Create,
+            path: dest,
+            context: None,
+        });
     }
 
-    Ok(tracked_files)
+    Ok(tracked)
+}
+
+pub fn uninstall_bep_mod(
+    package: PackageReference,
+    package_deps: Vec<PackageReference>,
+    package_dir: PathBuf,
+    state_dir: PathBuf,
+    staging_dir: PathBuf,
+    tracked_files: Vec<TrackedFile>,
+) -> Result<()> {
+    for file in tracked_files {
+        eprintln!("remove: {:?}", file);
+        fs::remove_file(&file.path)?;
+    }
+
+    Ok(())
 }
 
 /// Recursively copy the contents of src into dest, returning the list of created files when done.
-fn tracked_dir_copy(src: &Path, dest: &Path, tracker: &mut Vec<PathBuf>) -> Result<()> {    
+fn tracked_dir_copy(src: &Path, dest: &Path, tracker: &mut Vec<TrackedFile>) -> Result<()> {    
     let files = WalkDir::new(src)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -165,7 +194,11 @@ fn tracked_dir_copy(src: &Path, dest: &Path, tracker: &mut Vec<PathBuf>) -> Resu
         }
 
         fs::copy(file.path(), &dest)?;
-        tracker.push(dest);
+        tracker.push(TrackedFile {
+            action: FileAction::Create,
+            path: dest,
+            context: None,
+        });
     }
 
     Ok(())

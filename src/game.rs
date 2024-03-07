@@ -3,13 +3,15 @@ use std::process::{Command, Stdio};
 
 use anyhow::Result;
 
-#[cfg(linux)]
+#[cfg(target_os = "linux")]
 pub fn start_game(
     mods_enabled: bool,
     project_state: PathBuf,
     game_dir: PathBuf,
     game_exe: PathBuf,
+	args: Vec<String>,
 ) -> Result<u32> {
+	use std::env;
 	use crate::linux_utils::Arch;
 	
 	if !mods_enabled {
@@ -44,12 +46,13 @@ pub fn start_game(
 		.env("DOORSTOP_CORLIB_OVERRIDE_PATH", corlib.into_os_string())
 		.env("LD_LIBRARY_PATCH", ld_lib)
 		.env("LD_PRELOAD", ld_preload)
+		.args(args)
 		.spawn()?;
 
 	Ok(child.id())
 }
 
-#[cfg(windows)]
+#[cfg(target_os = "windows")]
 pub fn start_game(
     mods_enabled: bool,
     project_state: PathBuf,
@@ -85,15 +88,15 @@ pub fn start_game(
 		.join("core")
 		.join("BepInEx.Preloader.dll")
 		.to_string_lossy()
-		.to_owned()
+		.into_owned()
 		.replace("\\\\?\\", "");
-	
-	// let preloader = project_state
-	// 	.join("BepInEx/core/BepInEx.Preloader.dll")
-	// 	.canonicalize()
-	// 	.expect("Preloader does not exist, cannot start the game.");
 
-	let test = r#"C:/Users/Ethan/Dev/rust/thunderstore-cli/.tcli/project_state/BepInEx/core/BepInEx.Preloader.dll"#;
+	let mut passed_args = args.iter().map(|x| x.as_str()).collect::<Vec<_>>();
+	let mut proc_args = vec![
+		"--doorstop-enabled", "true",
+		"--doorstop-target", &preloader,
+	];
+	proc_args.append(&mut passed_args);
 
 	let child = Command::new(game_exe)
 		.creation_flags(creation_flags)
@@ -102,8 +105,7 @@ pub fn start_game(
 		.stdin(Stdio::null())
 		.stderr(Stdio::null())
 		.env("WINEDLLOVERRIDE", "winhttp")
-		.args(["--doorstop-enabled", "true"])
-		.args(["--doorstop-target", test])
+		.args(proc_args)
 		.spawn()?;
 
 	Ok(child.id())

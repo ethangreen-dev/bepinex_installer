@@ -2,10 +2,10 @@ mod types;
 mod install;
 mod game;
 
-#[cfg(linux)]
+#[cfg(target_os = "linux")]
 mod linux_utils;
 
-#[cfg(windows)]
+#[cfg(target_os = "windows")]
 mod win_utils;
 
 use std::env;
@@ -14,7 +14,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use types::{Version, PackageReference};
+use types::{Version, PackageReference, FileAction, TrackedFile};
 
 pub static INSTALLER_VERSION: Version = Version {
     major: 1,
@@ -32,7 +32,7 @@ pub enum Request {
         package_deps: Vec<PackageReference>,
         package_dir: PathBuf,
         state_dir: PathBuf,
-        game_dir: PathBuf,
+        staging_dir: PathBuf,
     },
     PackageUninstall {
         is_modloader: bool,
@@ -40,8 +40,17 @@ pub enum Request {
         package_deps: Vec<PackageReference>,
         package_dir: PathBuf,
         state_dir: PathBuf,
-        game_dir: PathBuf,
-        tracked_files: Vec<PathBuf>,
+        staging_dir: PathBuf,
+        tracked_files: Vec<TrackedFile>,
+    },
+    PostInstallHook {
+        is_modloader: bool,
+        package: PackageReference,
+        package_deps: Vec<PackageReference>,
+        package_dir: PathBuf,
+        state_dir: PathBuf,
+        staging_dir: PathBuf,
+        post_hook_context: String,
     },
     StartGame {
         mods_enabled: bool,
@@ -60,10 +69,14 @@ pub enum Response {
         protocol: Version,
     },
     PackageInstall {
-        tracked_files: Vec<PathBuf>,
+        tracked_files: Vec<TrackedFile>,
+        post_hook_context: Option<String>,
     },
     PackageUninstall {
-        tracked_files: Vec<PathBuf>,
+        post_hook_context: Option<String>,
+    },
+    PostInstallHook {
+        tracked_files: Vec<TrackedFile>,
     },
     StartGame {
         pid: u32,  
@@ -78,7 +91,7 @@ fn main() -> Result<()> {
     let result = match handle_args(args) {
         Ok(x) => x,
         Err(e) => {
-            let message = format!("{e:?}");
+            let message = format!("{e} {}", e.backtrace());
             
             Response::Error {
                 message,
@@ -115,7 +128,7 @@ fn handle_args(args: Vec<String>) -> Result<Response> {
             package_deps,
             package_dir,
             state_dir,
-            game_dir,
+            staging_dir,
         } => {
             let tracked_files = if is_modloader {
                 install::install_bep(
@@ -123,7 +136,7 @@ fn handle_args(args: Vec<String>) -> Result<Response> {
                     package_deps,
                     package_dir,
                     state_dir,
-                    game_dir,
+                    staging_dir,
                 )?
             } else {
                 install::install_bep_mod(
@@ -131,13 +144,39 @@ fn handle_args(args: Vec<String>) -> Result<Response> {
                     package_deps,
                     package_dir,
                     state_dir,
-                    game_dir,
+                    staging_dir,
                 )?
             };
 
             Response::PackageInstall {
                 tracked_files,  
-            }        
+                post_hook_context: None,
+            }
+        }
+
+        Request::PackageUninstall {
+            is_modloader,
+            package,
+            package_deps,
+            package_dir,
+            state_dir,
+            staging_dir,
+            tracked_files
+        } => {
+            eprintln!("{:?}", tracked_files);
+
+            install::uninstall_bep_mod(
+                package,
+                package_deps,
+                package_dir,
+                state_dir,
+                staging_dir,
+                tracked_files,
+            )?;
+
+            Response::PackageUninstall { 
+                post_hook_context: None 
+            }
         }
 
         Request::StartGame { 
